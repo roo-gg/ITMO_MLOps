@@ -18,13 +18,7 @@ docker-compose.yml             # ClearML Server, ClearML Serving runtime, Gradio
 screenshots/                   # подтверждающие скриншоты выполненного локального запуска
 ```
 
-Все команды рассчитаны на PowerShell и выполняются из корня репозитория.
-
 ## Требования к окружению
-
-- Docker Desktop запущен.
-- Python 3.11+ доступен из PowerShell.
-- Команды выполняются из корня репозитория.
 
 ```powershell
 python -m venv .venv
