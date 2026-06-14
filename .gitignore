@@ -1,0 +1,20 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.clearml/
+
+# Generated during local runs
+data/sentiment_reviews/
+models/
+dataset/dataset_id.txt
+train/last_task_id.txt
+train/last_model_id.txt
+registry/model_id.txt
+
+# Local editor/system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

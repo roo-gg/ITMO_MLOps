@@ -1,0 +1,163 @@
+name: textflow-course
+
+x-clearml-runtime: &clearml-runtime
+  CLEARML_API_HOST: http://apiserver:8008
+  CLEARML_WEB_HOST: http://webserver:80
+  CLEARML_FILES_HOST: http://host.docker.internal:8081
+  CLEARML_API_ACCESS_KEY: ${CLEARML_API_ACCESS_KEY:-}
+  CLEARML_API_SECRET_KEY: ${CLEARML_API_SECRET_KEY:-}
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    networks: [backend]
+
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    command: --setParameter internalQueryMaxBlockingSortMemoryUsageBytes=196100200
+    volumes:
+      - mongo_data:/data/db
+    networks: [backend]
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.18
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data
+    networks: [backend]
+
+  fileserver:
+    image: clearml/server:latest
+    command: fileserver
+    restart: unless-stopped
+    environment:
+      CLEARML__fileserver__delete__allow_batch: "true"
+    ports:
+      - "8081:8081"
+    volumes:
+      - clearml_logs:/var/log/clearml
+      - clearml_config:/opt/clearml/config
+      - clearml_files:/mnt/fileserver
+    networks: [backend, frontend]
+
+  apiserver:
+    image: clearml/server:latest
+    command: apiserver
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - mongo
+      - elasticsearch
+      - fileserver
+    environment:
+      CLEARML_ELASTIC_SERVICE_HOST: elasticsearch
+      CLEARML_ELASTIC_SERVICE_PORT: 9200
+      CLEARML_MONGODB_SERVICE_HOST: mongo
+      CLEARML_MONGODB_SERVICE_PORT: 27017
+      CLEARML_REDIS_SERVICE_HOST: redis
+      CLEARML_REDIS_SERVICE_PORT: 6379
+      CLEARML_SERVER_DEPLOYMENT_TYPE: linux
+      CLEARML__apiserver__pre_populate__enabled: "true"
+      CLEARML__apiserver__files__default_storage__fileserver: http://fileserver:8081
+      CLEARML__services__async_urls_delete__enabled: "true"
+    ports:
+      - "8008:8008"
+    volumes:
+      - clearml_logs:/var/log/clearml
+      - clearml_config:/opt/clearml/config
+      - clearml_files:/mnt/fileserver
+    networks: [backend, frontend]
+
+  webserver:
+    image: clearml/server:latest
+    command: webserver
+    restart: unless-stopped
+    depends_on:
+      - apiserver
+    ports:
+      - "8090:80"
+    networks: [backend, frontend]
+
+  async_delete:
+    image: clearml/server:latest
+    restart: unless-stopped
+    depends_on:
+      - apiserver
+      - redis
+      - mongo
+      - elasticsearch
+      - fileserver
+    environment:
+      CLEARML_ELASTIC_SERVICE_HOST: elasticsearch
+      CLEARML_ELASTIC_SERVICE_PORT: 9200
+      CLEARML_MONGODB_SERVICE_HOST: mongo
+      CLEARML_MONGODB_SERVICE_PORT: 27017
+      CLEARML_REDIS_SERVICE_HOST: redis
+      CLEARML_REDIS_SERVICE_PORT: 6379
+      PYTHONPATH: /opt/clearml/apiserver
+    entrypoint:
+      - python3
+      - -m
+      - jobs.async_urls_delete
+      - --fileserver-host
+      - http://fileserver:8081
+    volumes:
+      - clearml_logs:/var/log/clearml
+      - clearml_config:/opt/clearml/config
+    networks: [backend]
+
+  clearml-serving:
+    build:
+      context: .
+      dockerfile: docker/serving/Dockerfile
+    profiles: ["serving"]
+    restart: unless-stopped
+    depends_on:
+      - apiserver
+      - fileserver
+    environment:
+      <<: *clearml-runtime
+      CLEARML_SERVING_TASK_ID: ${CLEARML_SERVING_TASK_ID:-}
+      CLEARML_SERVING_POLL_FREQ: ${CLEARML_SERVING_POLL_FREQ:-5}
+    ports:
+      - "8082:8080"
+    networks: [backend, frontend]
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/ui/Dockerfile
+    profiles: ["ui"]
+    restart: unless-stopped
+    depends_on:
+      - clearml-serving
+    environment:
+      SERVING_ENDPOINT: http://clearml-serving:8080/serve/text-sentiment
+      UI_PORT: 7860
+    ports:
+      - "7860:7860"
+    networks: [frontend]
+
+volumes:
+  mongo_data:
+  elastic_data:
+  clearml_logs:
+  clearml_config:
+  clearml_files:
+
+networks:
+  backend:
+  frontend:
